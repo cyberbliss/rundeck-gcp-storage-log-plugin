@@ -1,0 +1,85 @@
+plugins {
+    id 'pl.allegro.tech.build.axion-release' version '1.5.0'
+}
+
+apply plugin: 'java'
+apply plugin: 'idea'
+apply plugin: 'pl.allegro.tech.build.axion-release'
+apply plugin: 'maven'
+
+sourceCompatibility = 1.8
+
+ext.rundeckVersion='3.0.22-20190512'
+ext.googleStorageSDKVersion='1.76.0'
+ext.rundeckPluginVersion= '1.2'
+ext.pluginName = 'GCP Storage Log Plugin'
+ext.pluginDescription = 'Store execution log files in GCP Storage buckets'
+ext.pluginClassNames = 'org.rundeck.plugins.GcpStorageLogFileStoragePlugin'
+
+defaultTasks 'clean', 'build'
+
+scmVersion {
+    ignoreUncommittedChanges = false
+    tag {
+        prefix = 'v'
+        versionSeparator = ''
+        def origDeserialize=deserialize
+        //append .0 to satisfy semver if the tag version is only X.Y
+        deserialize = { config, position, tagName ->
+            def orig = origDeserialize(config, position, tagName)
+            if (orig.split('\\.').length < 3) {
+                orig += ".0"
+            }
+            orig
+        }
+    }
+}
+project.version = scmVersion.version
+
+configurations {
+    pluginLibs
+    
+    implementation{
+        extendsFrom pluginLibs
+    }
+}
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    
+    implementation(group:'org.rundeck', name: 'rundeck-core', version: rundeckVersion)
+    pluginLibs(group: 'com.google.cloud', name: 'google-cloud-storage', version:googleStorageSDKVersion)
+    pluginLibs(group: 'commons-io', name: 'commons-io', version: '2.6')
+
+    testImplementation group: 'junit', name: 'junit', version: '4.12'
+    testImplementation(group: 'com.google.cloud', name: 'google-cloud-nio', version: '0.94.0-alpha')
+}
+
+// task to copy plugin libs to output/lib dir
+task copyToLib(type: Copy) {
+    into "$buildDir/output/lib"
+    from configurations.pluginLibs
+}
+
+jar {
+    from "$buildDir/output"
+    manifest {
+        def libList = configurations.pluginLibs.collect{'lib/' + it.name}.join(' ')
+        attributes 'Rundeck-Plugin-Name' : pluginName
+        attributes 'Rundeck-Plugin-Description' : pluginDescription
+        attributes 'Rundeck-Plugin-Rundeck-Compatibility-Version': '2.8.2+'
+        attributes 'Rundeck-Plugin-Tags': 'java,executor file storage,resource model,workflow step,gcp'
+        attributes 'Rundeck-Plugin-License': 'Apache 2.0'
+        attributes 'Rundeck-Plugin-Source-Link': 'https://github.com/rundeck-plugins/rundeck-azure-plugin'
+        attributes 'Rundeck-Plugin-Target-Host-Compatibility': 'all'
+        attributes 'Rundeck-Plugin-Author': 'Stephen Judd'
+        attributes 'Rundeck-Plugin-Classnames': pluginClassNames
+        attributes 'Rundeck-Plugin-File-Version': project.version
+        attributes 'Rundeck-Plugin-Version': rundeckPluginVersion
+        attributes 'Rundeck-Plugin-Archive': 'true'
+        attributes 'Rundeck-Plugin-Libs': "${libList}"
+    }
+    dependsOn(copyToLib)
+}
