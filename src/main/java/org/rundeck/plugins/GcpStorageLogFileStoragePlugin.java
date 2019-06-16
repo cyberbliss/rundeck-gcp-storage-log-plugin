@@ -1,7 +1,7 @@
 package org.rundeck.plugins;
 
 import com.dtolabs.rundeck.core.dispatcher.DataContextUtils;
-import com.dtolabs.rundeck.core.logging.ExecutionFileStorageException;
+import com.dtolabs.rundeck.core.logging.*;
 import com.dtolabs.rundeck.core.plugins.Plugin;
 import com.dtolabs.rundeck.plugins.ServiceNameConstants;
 import com.dtolabs.rundeck.plugins.descriptions.PluginDescription;
@@ -18,10 +18,11 @@ import java.text.MessageFormat;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Set;
 
 @Plugin(service = ServiceNameConstants.ExecutionFileStorage, name = "org.rundeck.gcp-storage")
 @PluginDescription(title = "GCP Storage", description = "Stores log files in a GCP Storage bucket")
-public class GcpStorageLogFileStoragePlugin implements ExecutionFileStoragePlugin {
+public class GcpStorageLogFileStoragePlugin implements ExecutionFileStoragePlugin, ExecutionMultiFileStorage {
 
     public static final String DEFAULT_PATH_FORMAT = "project/${job.project}/${job.execid}";
 
@@ -129,6 +130,34 @@ public class GcpStorageLogFileStoragePlugin implements ExecutionFileStoragePlugi
     }
 
     @Override
+    public void storeMultiple(MultiFileStorageRequest files) throws IOException, ExecutionFileStorageException {
+        Set<String> availableFiletypes = files.getAvailableFiletypes();
+        logger.debug(MessageFormat.format("Storing multiple files to GCP bucket {0} filetypes: {1}", getBucket(), availableFiletypes));
+
+        for (String filetype : availableFiletypes) {
+            StorageFile storageFile = files.getStorageFile(filetype);
+            boolean success;
+            try {
+                success = store(
+                    filetype,
+                    storageFile.getInputStream(),
+                    storageFile.getLength(),
+                    storageFile.getLastModified()
+                );
+                files.storageResultForFiletype(filetype, success);
+            } catch (ExecutionFileStorageException e) {
+                if (files instanceof MultiFileStorageRequestErrors) {
+                    MultiFileStorageRequestErrors errors = (MultiFileStorageRequestErrors) files;
+                    errors.storageFailureForFiletype(filetype, e.getMessage());
+                } else {
+                    logger.error(e.getMessage(), e);
+                    files.storageResultForFiletype(filetype, false);
+                }
+            }
+        }
+    }
+
+    @Override
     public boolean retrieve(String filetype, OutputStream stream) throws IOException, ExecutionFileStorageException {
         String filePath = resolvedFilepath(expandedPath, filetype);
         BlobId blobId = BlobId.of(bucket, filePath);
@@ -227,4 +256,6 @@ public class GcpStorageLogFileStoragePlugin implements ExecutionFileStoragePlugi
     public void setPath(String path) {
         this.path = path;
     }
+
+
 }
